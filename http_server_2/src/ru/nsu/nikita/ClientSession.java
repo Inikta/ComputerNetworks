@@ -1,19 +1,14 @@
 package ru.nsu.nikita;
 
-import javax.naming.spi.DirectoryManager;
 import java.io.*;
 import java.net.Socket;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Date;
-import java.util.Iterator;
 import java.util.Scanner;
-import static ru.nsu.nikita.RequestType.*;
 
-/**
- * Обрабатывает запрос клиента.
- */
+import static ru.nsu.nikita.RequestType.*;
 public class ClientSession implements Runnable {
 
     private Socket socket;
@@ -29,13 +24,10 @@ public class ClientSession implements Runnable {
     @Override
     public void run() {
         try {
-            /* Получаем заголовок сообщения от клиента */
             String header = readHeader();
             System.out.println(header + "\n");
-            /* Получаем из заголовка указатель на интересующий ресурс */
             String request = parseHeader(header);
             System.out.println("Resource: " + request + "\n");
-            /* Отправляем содержимое ресурса клиенту */
             int code = send(request);
             System.out.println("Result code: " + code + "\n");
         } catch (IOException e) {
@@ -56,9 +48,7 @@ public class ClientSession implements Runnable {
     }
 
     private void initialize() throws IOException {
-        /* Получаем поток ввода, в который помещаются сообщения от клиента */
         in = socket.getInputStream();
-        /* Получаем поток вывода, для отправки сообщений клиенту */
         out = socket.getOutputStream();
         DEFAULT_PATH = computeDefaultPath();
     }
@@ -67,6 +57,7 @@ public class ClientSession implements Runnable {
         Path path = Path.of(DEFAULT_FILES_DIR);
         return path.normalize().toAbsolutePath();
     }
+
     /**
      * Считывает заголовок сообщения от клиента.
      *
@@ -112,21 +103,25 @@ public class ClientSession implements Runnable {
      * клиента.
      *
      * @param header заголовок сообщения от клиента.
-     * @return идентификатор ресурса.
+     * @return ресурс.
      */
     private String getURIFromHeader(String header) {
         int from = header.indexOf(" ") + 1;
         int to = header.substring(from).indexOf(" ");
+
+        if (from > to + from || from < 0 || to + from > header.length()) {
+            return "";
+        }
 
         return header.substring(from, to + from);
     }
 
     /**
      * Отправляет ответ клиенту. В качестве ответа отправляется http заголовок и
-     * содержимое указанного ресурса. Если ресурс не указан, отправляется
-     * перечень доступных ресурсов.
+     * содержимое указанного файла. Если это папка, то отправляется
+     * список содержимого папки.
      *
-     * @param request идентификатор запрашиваемого ресурса.
+     * @param request запрашиваемый ресурс.
      * @return код ответа. 200 - если ресурс был найден, 404 - если нет.
      * @throws IOException
      */
@@ -152,31 +147,28 @@ public class ClientSession implements Runnable {
         PrintStream answerStream = new PrintStream(out, true, "UTF-8");
         answerStream.print(header);
         if (code == 200) {
-            int size = answer.getBytes().length;
-            int chunk = 1024;
-            int pos = 0;
-            while (pos < size) {
-                out.write(answer.getBytes(), pos, (pos + chunk) % answer.length());
-                pos += chunk;
-            }
+            out.write(answer.getBytes());
         }
         return code;
     }
 
     private String createFileAnswer(Path path) throws IOException {
 
-        Scanner scanner = new Scanner(path);
         StringBuilder answer = new StringBuilder();
 
         if (path.toString().contains(".txt") || path.toString().contains(".html")) {
+            Scanner scanner = new Scanner(path);
             while (scanner.hasNextLine()) {
-                answer.append(scanner.nextLine());
+                answer.append(scanner.nextLine()).append("\n");
             }
+        } else if (path.toString().contains(".")) {
+            answer.append("ERROR : WRONG FILE TYPE");
         } else {
+            answer.append("The contents of the ").append(path.getFileName()).append(" folder is: \n");
             DirectoryStream.Filter<Path> directoryContent = entry -> entry.getParent().equals(path);
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(path, directoryContent)) {
                 for (Path p : stream) {
-                    answer.append(p.getFileName());
+                    answer.append("\t- ").append(p.getFileName()).append("\n");
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -207,14 +199,11 @@ public class ClientSession implements Runnable {
      * @return комментарий к коду результата отправки.
      */
     private String getAnswer(int code) {
-        switch (code) {
-            case 200:
-                return "OK";
-            case 404:
-                return "Not Found";
-            default:
-                return "Internal Server Error";
-        }
+        return switch (code) {
+            case 200 -> "OK";
+            case 404 -> "Not Found";
+            default -> "Internal Server Error";
+        };
     }
 }
 
